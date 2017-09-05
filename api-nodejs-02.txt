@@ -1,0 +1,85 @@
+var User = require('./models').User;
+var passport = require('passport');
+var roles = require('./models').roles;
+var $handler = require('../toolkit/db').$handler;
+var $404 = require('../toolkit/db').$404;
+
+module.exports = {
+	routes: {
+		'/socket/login': {
+			method: 'post',
+			callback: function(req,res) {
+				debugger;
+				User.find(req.body, $handler(res, function(body) {
+					res.send({
+						uId : body[0]._id
+					});
+				}))
+			}
+		},
+		'/login': {
+			method: 'post',
+			callback:  function(req,res, next) {
+				return passport.authenticate('local', function(err, user, info) {
+				    if (err) { return next(err); }
+				    if (!user) { return res.status(401).send({'error_code':'login_failed', 'message':'Not logged in'}); }
+				    
+				    req.logIn(user, function(err) {
+					    if (err) { return next(err); }
+					    return res.sendStatus(200);
+				    });
+				})(req, res, next)
+			} 
+		},
+		'/register': {
+			method: 'post', 
+			callback: function(req, res) {
+				var body = req.body;
+				
+				var keys =  {$or: [
+					{'username': body['username']},
+					{'email': body['email']}
+				]}
+				if(body.confirm == body.password) {
+					body.roles = [roles.SUPERUSER];
+					User.findOne(keys, $handler(res, function(user) {
+						if(!user) {
+							User(body).save($handler(res, function(body){
+								res.send({status:"ok"});
+							}))
+						} else {
+							res.status(401).send({'module':'registration',
+												  'error_code': 'your_email_or_name_is_used', 
+												  'message': 'User with your email or login is already existing'})
+						}
+					}))
+				} else {
+					res.status(401).send({
+						'module':'registration',
+						'error_code':"passwords_not_match",
+						'message': "Your password and confirm password doesn't match"
+					})
+				}
+			}
+		},
+		'/check' : {
+			method: 'get',
+			callback: function(req, res) {
+				if(req.isAuthenticated())
+					res.send(req.user);
+				else
+					res.send({
+						'error_code':'not_authenticated', 
+						'message':'You are not authenticated'
+					})
+			}
+		},
+		'/logout': {
+			method: 'post',
+			callback: function(req, res){
+			  	req.logout();
+			  	res.send({status:'logged out'})
+			}
+		},
+	},
+}

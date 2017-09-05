@@ -1,0 +1,102 @@
+var models = require('./models')
+var auth_roles = require('../auth_module/models').roles
+var User = require('../auth_module/models').User
+
+var auth_middleware = require('../auth_module/middlewares');
+var $handler = require('../toolkit/db').$handler
+var $404 = require('../toolkit/db').$404;
+
+module.exports = {
+	routes: {
+		'/': {
+			method: 		['post','get'],
+			middleware: 	[auth_middleware.has_role(auth_roles.SUPERUSER)],
+			callback: function (req,res) {
+				if(req.method == 'POST') {
+					var body = req.body;
+					body.owner = req.user;
+					body.created = new Date();
+					models.Dashboard(body).save(
+						$handler(res, function(dashboard) {
+								req.user.dashboards.push(dashboard.id);
+								req.user.save($handler(res, function(body){
+									res.sendStatus(200);
+								}))
+							})
+						);
+				}
+				if(req.method == 'GET') {
+
+					models.Dashboard.find({owner: req.user}, $handler(res, function(body) {
+						res.status(200).send({dashboars: body, user_id: req.user.id});
+					}))
+				}
+			}
+		},
+		'/:dash_id': {
+			method: 		['get', 'put', 'delete'],
+			middleware: 	[auth_middleware.is_authenticated],
+			callback: function (req,res) {
+				if(req.method == 'GET') {
+					models.Dashboard
+						.findById(req.params.dash_id)
+						.exec(res, $handler(res, 
+							$404(function(body){
+								models.Widget
+									.find({dashboard: body})
+									.populate('template')
+									.exec($handler(res, function(widgets) {
+										body = body.toObject()
+										body.widgets = widgets;
+										res.send(body);
+									}))
+							})))
+				}
+				if(req.method == 'PUT') {
+					var _params = {_id: req.params.dash_id},
+						_body = req.body;
+					_body.updated = new Date();
+
+					models.Dashboard.update(_params, _body, $handler(res, function(body) {
+						res.status(200).send(body);
+					}))
+				}
+				if(req.method == 'DELETE') {
+					models.Dashboard.findByIdAndRemove(req.params.dash_id, $handler(res, function(body) {
+						res.status(200).send(body)
+					}))
+				}
+			}
+		},
+		'/:dash_id/widgets': {
+			method: 		['delete', 'post', 'put', 'get'],
+			middleware: 	[auth_middleware.has_role([auth_roles.SUPERUSER])],
+			callback: function(req, res) {
+				var widget_id = req.query.widget_id;
+				var dash_id = req.params.dash_id;
+				if(req.method == 'GET') {
+					models.Widget.find({dashboard:dash_id}, $handler(res, $404(function(widgets){ 
+						res.send({data: widgets})
+					})))
+				}
+				if(req.method == 'DELETE') {
+					models.Widget.findByIdAndRemove(widget_id, $handler(res, function(body) { 
+						res.status(201).send(body)
+					}))
+				}
+				if(req.method == 'POST') {
+					var body = req.body;
+					debugger;
+					body.create = new Date();
+					models.Dashboard.findById(dash_id, $handler(res, $404(function(dashboard) {
+						var widget = models.Widget(body);
+						widget.dashboard = dashboard.id;
+						widget.save($handler(res,function(widget) {
+							res.send(widget);
+						}))
+					})))
+				}
+			}
+		},
+	}
+}
